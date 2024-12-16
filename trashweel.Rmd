@@ -7,12 +7,12 @@ editor_options:
   chunk_output_type: console
 ---
 
-```{r setup, include=TRUE}
+```{r setup, echo=TRUE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ### Loading libraries
-```{r message=FALSE, warning=FALSE, echo=TRUE, results='hide'}
+```{r }
 
 library(tidyverse)
 library(skimr)
