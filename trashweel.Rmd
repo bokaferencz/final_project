@@ -1,0 +1,647 @@
+---
+title: "Final_project-  trashwheel"
+author: "Ferencz Boróka"
+date: "2024-12-15"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Loading libraries
+```{r message=FALSE, warning=FALSE, echo=TRUE, results='hide'}
+
+library(tidyverse)
+library(skimr)
+library(lmtest)
+library(car)
+```
+
+## Reading the file
+```{r }
+
+
+#reading the file with tidytuesdayR 
+tuesdata <- tidytuesdayR::tt_load(2024, week = 10)
+
+trashwheel <- tuesdata$trashwheel
+
+```
+
+## Inspecting the dataframe
+
+```{r }
+
+str(trashwheel)   # Check the structure
+dim(trashwheel)   # Dimensions 
+head(trashwheel)  # Preview first few rows
+colnames(trashwheel) # List column names
+sapply(trashwheel, class) # Check data types
+table(trashwheel$Month) # Checking the month variable values
+
+```
+
+# Cleaning the dataframe
+
+```{r }
+
+# Count missing values per column
+colSums(is.na(trashwheel)) 
+
+# Impute or remove missing values (example: imputation for numeric columns)
+trashwheel <- trashwheel %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+# Remove duplicates
+trashwheel <- trashwheel %>%
+  distinct()
+
+# Convert Year to a factor
+trashwheel$Year <- as.factor(trashwheel$Year)
+unique(trashwheel$Year)
+
+# Convert the Month column to lowercase so I'll only have 12 types
+trashwheel$Month <- tolower(trashwheel$Month)
+
+# Check the unique values to verify there are now only 12 months
+unique(trashwheel$Month)
+
+#making a YearMonth variable
+trashwheel$YearMonth <- paste(trashwheel$Year, trashwheel$Month, sep = "-")
+
+#Checking unique values
+unique(trashwheel$YearMonth)
+unique(trashwheel$HomesPowered)
+unique(trashwheel$Name)
+```
+
+
+# Exploratory Data Analysis
+
+```{r }
+# Summary statistics
+skim(trashwheel)
+
+
+#making a new dataframe with a YearMOnth grouping and  averaging volume and wheight
+trashwheel_volume_weight <- trashwheel %>%
+  group_by(YearMonth) %>%
+  summarise(
+    mean_volume = mean(Volume, na.rm = TRUE),
+    mean_weight = mean(Weight, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+# Plot Mean Weight over Time
+ggplot(trashwheel_volume_weight, aes(x = YearMonth, y = mean_weight, group = 1)) +
+  geom_line(color = "blue") +
+  geom_point(color = "blue") +
+  labs(title = "Mean Weight Over Time", x = "Year-Month", y = "Mean Weight") +
+  theme_minimal() +
+  scale_x_discrete(breaks = trashwheel_volume_weight$YearMonth[seq(1, nrow(trashwheel_volume_weight), by = 12)]) # Show every 12th value
+
+#plot Mean Volume over Time
+ggplot(trashwheel_volume_weight, aes(x = YearMonth, y = mean_volume, group = 1)) +
+  geom_line(color = "red") +
+  geom_point(color = "red") +
+  labs(title = "Mean Volume Over Time", x = "Year-Month", y = "Mean Volume") +
+  theme_minimal() +
+  scale_x_discrete(breaks = trashwheel_volume_weight$YearMonth[seq(1, nrow(trashwheel_volume_weight), by = 12)]) # Show every 12th value
+
+#making another dataframe with Yearmonth and Name grouping and homespowered averaged
+trashwheel_homespowered <- trashwheel %>%
+  group_by(YearMonth, Name) %>%
+  summarise(
+    mean_homespowered = mean(as.numeric(HomesPowered), na.rm = TRUE), # Convert HomePowered to numeric if needed
+    .groups = "drop"
+  )
+
+#Plot: homespowered over time, with distinct trashwheels
+ggplot(trashwheel_homespowered, aes(x = YearMonth, y = mean_homespowered, group = 1)) +
+  geom_line(color = "blue") +
+  geom_point(color = "blue") +
+  labs(
+    title = "Mean Homes Powered Over Time by Trashwheel",
+    x = "Year-Month",
+    y = "Mean Homes Powered"
+  ) +
+  theme_minimal() +
+  facet_wrap(~ Name)
+
+# Group by YearMonth and calculate means for specified trash types
+trashwheel_summary <- trashwheel %>%
+  group_by(YearMonth) %>%
+  summarise(
+    PlasticBottles = mean(PlasticBottles, na.rm = TRUE),
+    Polystyrene = mean(Polystyrene, na.rm = TRUE),
+    CigaretteButts = mean(CigaretteButts, na.rm = TRUE),
+    GlassBottles = mean(GlassBottles, na.rm = TRUE),
+    PlasticBags = mean(PlasticBags, na.rm = TRUE),
+    Wrappers = mean(Wrappers, na.rm = TRUE),
+    SportsBalls = mean(SportsBalls, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Reshape the data to long format 
+trashwheel_long <- trashwheel_summary %>%
+  pivot_longer(
+    cols = c(PlasticBottles, Polystyrene, CigaretteButts, GlassBottles, PlasticBags, Wrappers, SportsBalls),
+    names_to = "TrashType",
+    values_to = "MeanAmount"
+  )
+
+# Plot: trends of trash types over time
+ggplot(trashwheel_long, aes(x = YearMonth, y = MeanAmount, color = TrashType, group = TrashType)) +
+  geom_line(size = 1.2) +
+  scale_y_log10(labels = scales::comma_format()) + # Logarithmic scale for y-axis
+  scale_x_discrete(breaks = trashwheel_summary$YearMonth[seq(1, nrow(trashwheel_summary), by = 12)]) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = "Trends of Trash Types Over Time (Logarithmic Scale)",
+    x = "Year-Month",
+    y = "Mean Amount (Log Scale)",
+    color = "Trash Type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1) # Rotate x-axis labels
+  )
+
+
+```
+
+# Statistical analysis
+
+## Building a simple model
+```{r }
+
+trash_model <- lm(Weight ~ PlasticBottles + Polystyrene + CigaretteButts + 
+                  GlassBottles + PlasticBags + Wrappers + SportsBalls, 
+                  data = trashwheel)
+
+# View the model summary
+summary(trash_model)
+
+```
+
+
+#Checking all assumptions for the simple model
+## Checking Influential Points
+
+```{r influential_points_trash, echo=TRUE}
+
+# Check for influential points using Cook's distance
+cooks_d_trash <- cooks.distance(trash_model)
+
+# Visualize Cook's Distance
+cooks_data_trash <- data.frame(Observation = 1:length(cooks_d_trash), Cooks_Distance = cooks_d_trash)
+ggplot(cooks_data_trash, aes(x = Observation, y = Cooks_Distance)) +
+  geom_point() +
+  geom_hline(yintercept = 4 / length(cooks_d_trash), color = "red", linetype = "dashed") +
+  labs(title = "Cook's Distance for Influential Observations",
+       x = "Observation",
+       y = "Cook's Distance") +
+  theme_minimal()
+
+# Identify observations with Cook's distance greater than 4/n
+influentials_trash <- which(cooks_d_trash > (4 / nrow(trashwheel)))
+influentials_trash
+```
+
+
+###Checking normality of residuals
+```{r }
+# Calculate residuals
+residuals_trash <- residuals(trash_model)
+
+# Plot histogram of residuals
+ggplot(data.frame(residuals_trash = residuals_trash), aes(x = residuals_trash)) +
+  geom_histogram(binwidth = 0.5, color = "black", fill = "blue", alpha = 0.7) +
+  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency") +
+  theme_minimal()
+
+# Q-Q Plot for residuals
+qqnorm(residuals_trash)
+qqline(residuals_trash, col = "red", lwd = 2)
+```
+
+### Checking linearity
+```{r }
+# Get the fitted values
+fitted_values_trash <- fitted(trash_model)
+
+# Create a data frame for residuals vs fitted values
+residuals_vs_fitted_df_trash <- data.frame(fitted_values_trash, residuals_trash = residuals(trash_model))
+
+# Residuals vs Fitted plot
+ggplot(residuals_vs_fitted_df_trash, aes(x = fitted_values_trash, y = residuals_trash)) +
+  geom_point(color = "skyblue") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +  
+  labs(title = "Residuals vs Fitted Values", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+```
+
+### Checking Homoscedasticity
+```{r }
+
+
+# Scale-Location Plot for Visual Check
+plot(trash_model, which = 3)
+
+# Breusch-Pagan Test for Homoscedasticity
+bptest_trash <- bptest(trash_model)
+bptest_trash
+
+
+```
+
+
+### Checking multicolinearity
+```{r }
+
+
+# Calculate and check the VIF for the model
+vif_values_trash <- vif(trash_model)
+
+# Print VIF values
+print(vif_values_trash)
+
+
+```
+
+
+## Modifying the simple model
+```{r }
+trashwheel$log_Weight <- log(trashwheel$Weight)
+
+# building the logarthimical mdoel
+trash_model_log <- lm(log_Weight ~ PlasticBottles + Polystyrene + CigaretteButts + GlassBottles + PlasticBags + Wrappers + SportsBalls, data = trashwheel)
+
+```
+
+## Checking influential points
+
+```{r }
+
+# Check for influential points using Cook's distance
+cooks_d_trash_log <- cooks.distance(trash_model_log)
+
+# Visualize Cook's Distance
+cooks_data_trash_log <- data.frame(Observation = 1:length(cooks_d_trash_log), Cooks_Distance = cooks_d_trash_log)
+ggplot(cooks_data_trash_log, aes(x = Observation, y = Cooks_Distance)) +
+  geom_point() +
+  geom_hline(yintercept = 4 / length(cooks_d_trash_log), color = "red", linetype = "dashed") +
+  labs(title = "Cook's Distance for Influential Observations (Log Model)",
+       x = "Observation",
+       y = "Cook's Distance") +
+  theme_minimal()
+
+# Identify observations with Cook's distance greater than 4/n
+influentials_trash_log <- which(cooks_d_trash_log > (4 / nrow(trashwheel)))
+influentials_trash_log
+
+```
+
+
+## Checking Normality of Residuals
+```{r }
+# Calculate residuals
+residuals_trash_log <- residuals(trash_model_log)
+
+# Plot histogram of residuals
+ggplot(data.frame(residuals_trash_log = residuals_trash_log), aes(x = residuals_trash_log)) +
+  geom_histogram(binwidth = 0.5, color = "black", fill = "blue", alpha = 0.7) +
+  labs(title = "Histogram of Residuals (Log Model)", x = "Residuals", y = "Frequency") +
+  theme_minimal()
+
+# Q-Q Plot for residuals
+qqnorm(residuals_trash_log)
+qqline(residuals_trash_log, col = "red", lwd = 2)
+
+```
+
+## Checking Linearity
+```{r }
+# Get the fitted values
+fitted_values_trash_log <- fitted(trash_model_log)
+
+# Create a data frame for residuals vs fitted values
+residuals_vs_fitted_df_trash_log <- data.frame(
+  fitted_values_trash_log, 
+  residuals_trash_log = residuals(trash_model_log)
+)
+
+# Residuals vs Fitted plot
+ggplot(residuals_vs_fitted_df_trash_log, aes(x = fitted_values_trash_log, y = residuals_trash_log)) +
+  geom_point(color = "skyblue") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +  
+  labs(title = "Residuals vs Fitted Values (Log Model)", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+
+```
+
+
+## Checking homoscedasticity
+```{r }
+# Scale-Location Plot for Visual Check
+plot(trash_model_log, which = 3)
+
+# Breusch-Pagan Test for Homoscedasticity
+bptest_trash_log <- bptest(trash_model_log)
+bptest_trash_log
+
+```
+
+## Checking Multicolinearity
+```{r }
+# Calculate and check the VIF for the model
+vif_values_trash_log <- vif(trash_model_log)
+
+# Print VIF values
+print(vif_values_trash_log)
+
+```
+
+
+
+## Building a more complex model where season is included
+```{r }
+
+# Create the Season variable based on Month
+trashwheel$Season <- case_when(
+  trashwheel$Month %in% c("december", "january", "february") ~ "Winter",
+  trashwheel$Month %in% c("march", "april", "may") ~ "Spring",
+  trashwheel$Month %in% c("june", "july", "august") ~ "Summer",
+  trashwheel$Month %in% c("september", "october", "november") ~ "Autumn",
+  TRUE ~ NA_character_
+)
+
+# Convert Season to a factor variable
+trashwheel$Season <- factor(trashwheel$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
+
+# Verify the new variable
+table(trashwheel$Season)
+
+# Ensure Month is lowercase to avoid mismatches
+trashwheel$Month <- tolower(trashwheel$Month)
+
+# Create the Season variable based on Month
+trashwheel$Season <- case_when(
+  trashwheel$Month %in% c("december", "january", "february") ~ "Winter",
+  trashwheel$Month %in% c("march", "april", "may") ~ "Spring",
+  trashwheel$Month %in% c("june", "july", "august") ~ "Summer",
+  trashwheel$Month %in% c("september", "october", "november") ~ "Autumn",
+  TRUE ~ NA_character_
+)
+
+# Convert Season to a factor variable
+trashwheel$Season <- factor(trashwheel$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
+
+# Verify the new variable
+table(trashwheel$Season)
+
+# Linear regression model: Predict Weight by also Season
+season_model <- lm(Weight ~ PlasticBottles + Polystyrene + CigaretteButts + 
+                  GlassBottles + PlasticBags + Wrappers + SportsBalls + Season, data = trashwheel)
+
+# View the model summary
+summary(season_model)
+
+
+```
+
+
+#### Checking influential points
+
+```{r }
+
+# Check for influential points using Cook's distance
+cooks_d <- cooks.distance(season_model)
+
+# Visualize Cook's Distance
+cooks_data <- data.frame(Observation = 1:length(cooks_d), Cooks_Distance = cooks_d)
+ggplot(cooks_data, aes(x = Observation, y = Cooks_Distance)) +
+  geom_point() +
+  geom_hline(yintercept = 4 / length(cooks_d), color = "red", linetype = "dashed") +
+  labs(title = "Cook's Distance for Influential Observations",
+       x = "Observation",
+       y = "Cook's Distance") +
+  theme_minimal()
+
+# Identify observations with Cook's distance greater than 4/n
+influentials <- which(cooks_d > (4 / nrow(trashwheel)))
+influentials
+
+```
+
+#### Checking normality
+
+```{r }
+# Calculate residuals
+residuals_model <- residuals(season_model)
+
+# Plot histogram
+ggplot(data.frame(residuals = residuals_model), aes(x = residuals)) +
+  geom_histogram(binwidth = 0.5, color = "black", fill = "blue", alpha = 0.7) +
+  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency") +
+  theme_minimal()
+
+
+```
+
+#### Checking linearity
+
+```{r }
+
+# Get the fitted values
+fitted_values <- fitted(season_model)
+
+# Create a data frame for ggplot
+residuals_vs_fitted_df <- data.frame(fitted_values, residuals = residuals(season_model))
+
+# Residuals vs Fitted plot
+ggplot(residuals_vs_fitted_df, aes(x = fitted_values, y = residuals)) +
+  geom_point(color = "skyblue") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +  
+  labs(title = "Residuals vs Fitted Values-ordinal", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+
+```
+
+#### Checking for homoscedasticity
+```{r }
+plot(season_model, which = 3)
+
+# Breusch-Pagan Test for homoscedasticity
+bptest(season_model)
+
+```
+
+
+#### Checking the multicollinearity assumption
+
+```{r}
+
+# Calculate and check the VIF for the complex model
+vif_values <- vif(season_model)
+
+# Print VIF values
+print(vif_values)
+
+```
+
+#### Modifying the model
+```{r }
+
+# List of indices to remove
+influential_indices <- c(13, 19, 20, 26, 30, 34, 50, 62, 67, 94, 107, 113, 117, 122, 130, 
+                         272, 329, 407, 486, 518, 574, 578, 631, 633, 638, 639, 644, 645, 
+                         647, 651, 657, 658, 662, 673, 696, 709, 716, 726, 749, 750, 754, 
+                         755, 756, 770, 830)
+
+# Remove these rows from the trashwheel dataset
+trashwheel_cleaned <- trashwheel %>%
+  filter(!row_number() %in% influential_indices)
+
+# Check the first few rows to ensure the removal
+head(trashwheel_cleaned)
+
+
+# building the logarthimical mdoel
+season_model_log <- lm(log_Weight ~ PlasticBottles + Polystyrene + CigaretteButts + GlassBottles + PlasticBags + Wrappers + SportsBalls + Season, data = trashwheel)
+
+# summary of the model
+summary(season_model_log)
+
+
+```
+
+#### Checking influential points
+
+```{r }
+# Check for influential points using Cook's distance
+cooks_d_log <- cooks.distance(season_model_log)
+
+# Visualize Cook's Distance
+cooks_data_log <- data.frame(Observation = 1:length(cooks_d_log), Cooks_Distance = cooks_d_log)
+ggplot(cooks_data_log, aes(x = Observation, y = Cooks_Distance)) +
+  geom_point() +
+  geom_hline(yintercept = 4 / length(cooks_d_log), color = "red", linetype = "dashed") +
+  labs(title = "Cook's Distance for Influential Observations",
+       x = "Observation",
+       y = "Cook's Distance") +
+  theme_minimal()
+
+# Identify observations with Cook's distance greater than 4/n
+influentials_log <- which(cooks_d_log > (4 / nrow(trashwheel_cleaned)))
+influentials_log
+
+```
+
+#### Checking normality
+```{r }
+# Calculate residuals for the log model
+residuals_model_log <- residuals(season_model_log)
+
+# Plot histogram
+ggplot(data.frame(residuals = residuals_model_log), aes(x = residuals)) +
+  geom_histogram(binwidth = 0.5, color = "black", fill = "blue", alpha = 0.7) +
+  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency") +
+  theme_minimal()
+
+```
+
+#### Checking linearity
+```{r }
+# Get the fitted values for the log model
+fitted_values_log <- fitted(season_model_log)
+
+# Create a data frame for ggplot
+residuals_vs_fitted_df_log <- data.frame(fitted_values_log, residuals = residuals(season_model_log))
+
+# Residuals vs Fitted plot
+ggplot(residuals_vs_fitted_df_log, aes(x = fitted_values_log, y = residuals)) +
+  geom_point(color = "skyblue") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +  
+  labs(title = "Residuals vs Fitted Values-ordinal", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+```
+
+
+#### Checking homoscedasticity
+```{r }
+
+plot(season_model_log, which = 3)
+
+# Breusch-Pagan Test for homoscedasticity for the log model
+bptest(season_model_log)
+
+```
+
+
+#### checking multicolinearity
+```{r }
+
+# Calculate and check the VIF for the log model
+vif_values_log <- vif(season_model_log)
+
+# Print VIF values
+print(vif_values_log)
+
+```
+
+
+## Writing the final models
+```{r }
+
+# the modfied version of trash_model
+final_trash <- lm(log_Weight ~ PlasticBottles + Polystyrene + CigaretteButts + 
+                  GlassBottles + PlasticBags + Wrappers + SportsBalls, 
+                  data = trashwheel) 
+
+# Modified version of season_model
+final_season<- lm(log_Weight ~ PlasticBottles + Polystyrene + CigaretteButts + 
+                  GlassBottles + PlasticBags + Wrappers + SportsBalls + Season, 
+                  data = trashwheel)
+
+```
+
+
+### Comparing the models
+
+```{r }
+
+# Compare AIC values of the two models
+AIC(final_trash, final_season)
+# Compare BIC values of the two models
+BIC(final_trash, final_season)
+
+
+summary(final_trash)
+
+summary(final_season)
+
+```
+
+# Results and discussion
+## The regression equation
+for the simple model (final_trash) predicting the log of weight based on different trash categories is as follows:
+log ⁡ ( Weight ) = 1.133 − 0.00001963 × PlasticBottles − 0.00002926 × Polystyrene + 0.00000309 × CigaretteButts − 0.001765 × GlassBottles + 0.00004400 × PlasticBags − 0.00004355 × Wrappers + 0.002846 × SportsBalls 
+
+### Model Comparison
+Two regression models were used to predict the log-transformed weight of trash: the simpler model (final_trash) and the more complex model (final_season) that includes an additional variable for seasons. Simple Model (final_trash): The simple model explained a small proportion of the variance in the log-transformed weight of trash, with an adjusted R-squared of 0.1506. The model had a significant F-statistic, 𝐹 ( 7 , 985 ) = 26.12 F(7,985)=26.12, 𝑝 < 2.2 𝑒 − 16 p<0.001, suggesting that the included variables were collectively significant predictors. Among the variables, PlasticBottles, Polystyrene, CigaretteButts, PlasticBags, Wrappers, and SportsBalls were significant predictors of log-transformed weight. GlassBottles, however, was not a significant predictor (p = 0.11661). Complex Model (final_season): The more complex model, which also includes the variable Season, accounted for a slightly larger proportion of variance in the log-transformed weight of trash, with an adjusted R-squared of 0.1564. The model's overall fit was significant, with 𝐹 ( 10 , 982 ) = 19.39 F(10,982)=19.39, 𝑝 < 0,001. In this model, PlasticBottles, Polystyrene, CigaretteButts, PlasticBags, Wrappers, and SportsBalls remained significant, similar to the simple model. Additionally, SeasonSpring and SeasonSummer were found to be significant predictors, with SeasonAutumn showing no significant effect (p = 0.216571). 
+
+### Model Fit and Complexity 
+
+Although the complex model explains slightly more variance in the dependent variable (log-transformed weight of trash), with an adjusted R-squared increase from 0.1506 to 0.1564, the improvement is relatively small. This suggests that while seasonality may have a small effect on the weight of trash, the inclusion of season variables doesn't significantly improve the model compared to the simpler one.
+
+## Conclusion
+
+The simple model (final_trash) is preferred due to the simplicity and the fact that the addition of seasonal information in the complex model (final_season) does not substantially increase the explanatory power of the model. Removing the seasonality factor does not negatively impact the model's predictive accuracy much, making the simpler model an effective choice in this case.
